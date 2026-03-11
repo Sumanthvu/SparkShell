@@ -138,11 +138,20 @@ const sendMessage = asyncHandler(async (req, res) => {
     for (const modelName of modelCandidates) {
       try {
         const model = genAI.getGenerativeModel({ model: modelName });
-        const chatSession = model.startChat({
-          history: googleHistory.slice(0, -1),
-        });
+        const priorConversation = googleHistory
+          .slice(0, -1)
+          .map((entry) => {
+            const role = entry.role === "model" ? "Assistant" : "User";
+            const text = entry?.parts?.[0]?.text || "";
+            return `${role}: ${text}`;
+          })
+          .join("\n");
 
-        const result = await chatSession.sendMessage(content);
+        const prompt = priorConversation
+          ? `${priorConversation}\nUser: ${content}\nAssistant:`
+          : content;
+
+        const result = await model.generateContent(prompt);
         aiText = result.response.text();
         lastModelError = null;
         break;

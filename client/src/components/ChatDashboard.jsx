@@ -3,18 +3,32 @@ import { Menu, Plus, MessageSquare, Settings, Play, User, Send, X, Code, Termina
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import axiosClient from '../api/axiosClient';
+import { useNavigate } from 'react-router-dom';
 
 export default function ChatDashboard() {
+  const navigate = useNavigate();
   const chatApiBase = (import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000/api/users').replace('/api/users', '/api/v1/chats');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSandboxOpen, setIsSandboxOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [chats, setChats] = useState([]);
-  const [activeChatId, setActiveChatId] = useState(null);
+  const [activeChatId, setActiveChatId] = useState(() => localStorage.getItem('activeChatId'));
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [editorCode, setEditorCode] = useState('# Code editor ready\n');
   const chatContainerRef = useRef(null);
+  const profileMenuRef = useRef(null);
+  const userName = (() => {
+    try {
+      const rawUser = localStorage.getItem('user');
+      if (!rawUser) return 'User';
+      const parsedUser = JSON.parse(rawUser);
+      return parsedUser?.fullName || parsedUser?.name || 'User';
+    } catch {
+      return 'User';
+    }
+  })();
 
   useEffect(() => {
     fetchChats();
@@ -25,15 +39,58 @@ export default function ChatDashboard() {
   }, [activeChatId]);
 
   useEffect(() => {
+    if (activeChatId) {
+      localStorage.setItem('activeChatId', activeChatId);
+    } else {
+      localStorage.removeItem('activeChatId');
+    }
+  }, [activeChatId]);
+
+  useEffect(() => {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [messages, isLoading]);
 
+  useEffect(() => {
+    const handleOutsideClick = (event) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+        setIsProfileMenuOpen(false);
+      }
+    };
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setIsProfileMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, []);
+
   const fetchChats = async () => {
     try {
       const res = await axiosClient.get(`${chatApiBase}`);
-      setChats(res.data.data);
+      const chatList = res.data.data || [];
+      setChats(chatList);
+
+      if (!chatList.length) {
+        setActiveChatId(null);
+        setMessages([]);
+        return;
+      }
+
+      if (activeChatId) {
+        const exists = chatList.some((chat) => chat._id === activeChatId);
+        if (!exists) {
+          setActiveChatId(chatList[0]._id);
+        }
+      }
     } catch (err) { console.error(err); }
   };
 
@@ -80,6 +137,18 @@ export default function ChatDashboard() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await axiosClient.post('/logout');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      localStorage.removeItem('user');
+      localStorage.removeItem('activeChatId');
+      navigate('/login');
+    }
+  };
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[#0B0F19] text-white font-sans flex">
       <div className="absolute inset-0 z-0 pointer-events-none">
@@ -115,9 +184,26 @@ export default function ChatDashboard() {
             <button onClick={() => setIsSandboxOpen(!isSandboxOpen)} className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-medium text-sm ${isSandboxOpen ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30' : 'bg-white/5 text-gray-300 border border-white/5 hover:bg-white/10'}`}>
               {isSandboxOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />} <span className="hidden sm:inline">Sandbox</span>
             </button>
-            <button className="h-9 w-9 rounded-full bg-gradient-to-tr from-blue-600 to-purple-600 p-[2px] hover:scale-105 transition-transform">
-              <div className="h-full w-full rounded-full bg-[#0B0F19] flex items-center justify-center"><User size={16} className="text-white" /></div>
-            </button>
+            <div className="relative" ref={profileMenuRef}>
+              <button
+                onClick={() => setIsProfileMenuOpen((prev) => !prev)}
+                className="h-9 w-9 rounded-full bg-gradient-to-tr from-blue-600 to-purple-600 p-[2px] hover:scale-105 transition-transform"
+              >
+                <div className="h-full w-full rounded-full bg-[#0B0F19] flex items-center justify-center"><User size={16} className="text-white" /></div>
+              </button>
+
+              {isProfileMenuOpen && (
+                <div className="absolute right-0 top-12 w-52 rounded-xl border border-white/10 bg-[#111827]/95 backdrop-blur-xl shadow-lg p-2 z-50">
+                  <div className="px-3 py-2 text-sm text-gray-200 border-b border-white/10 truncate">{userName}</div>
+                  <button
+                    onClick={handleLogout}
+                    className="w-full text-left px-3 py-2 mt-1 rounded-lg text-sm text-red-400 hover:bg-white/5 transition-colors"
+                  >
+                    Log out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
