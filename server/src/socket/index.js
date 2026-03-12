@@ -10,6 +10,12 @@ import {
   buildGeminiPartsFromMessage,
   sanitizeAttachments,
 } from "../controllers/chat.controller.js";
+import {
+  findChatWithReadAccess,
+  findChatWithWriteAccess,
+  roomForChat,
+  roomForUser,
+} from "../utils/chatAccess.js";
 
 /* ── helper: parse raw cookie string into an object ── */
 const parseCookies = (header = "") =>
@@ -52,13 +58,39 @@ const registerSocketHandlers = (io) => {
   /* Apply auth to every connection */
   io.use(authenticateSocket);
 
-  io.on("connection", (socket) => {
+  io.on("connection", async (socket) => {
     console.log(
       `[Socket] Connected  → ${socket.user.email} (${socket.id})`
     );
 
     /* Put the user in their own room so we can target them later */
-    socket.join(`user_${socket.user._id}`);
+    socket.join(roomForUser(socket.user._id));
+
+    /* Auto-join every accessible chat room for live collaboration sync */
+    const accessibleChats = await Chat.find(
+      {
+        $or: [
+          { userId: socket.user._id },
+          { "collaborators.userId": socket.user._id },
+        ],
+      },
+      { _id: 1 }
+    );
+
+    for (const chat of accessibleChats) {
+      socket.join(roomForChat(chat._id));
+    }
+
+    socket.on("join_chat", async ({ chatId }) => {
+      try {
+        const chat = await findChatWithReadAccess(chatId, socket.user._id);
+        socket.join(roomForChat(chat._id));
+      } catch (err) {
+        socket.emit("ai_error", {
+          error: err?.message || "Unable to join this chat.",
+        });
+      }
+    });
 
     /* ─────────────────────────────────────────────────────────
        Event: send_message
@@ -69,30 +101,52 @@ const registerSocketHandlers = (io) => {
          "ai_done"       → { userMessage, aiMessage, chatId }
          "ai_error"      → { error }
     ───────────────────────────────────────────────────────── */
-    socket.on("send_message", async ({ chatId, content, attachments }) => {
+    socket.on("send_message", async ({ chatId, content, attachments, clientRequestId }) => {
       try {
         const normalizedAttachments = sanitizeAttachments(attachments);
         const normalizedContent = String(
           content || "Please analyze the attached files/images."
         ).trim();
 
+        if (!normalizedContent && !normalizedAttachments.length) {
+          socket.emit("ai_error", {
+            error: "Content or attachments required",
+            clientRequestId,
+          });
+          return;
+        }
+
         /* ── 1. Create chat if needed ── */
         let currentChatId = chatId;
+        let chatDoc = null;
         if (!currentChatId) {
           const newChat = await Chat.create({
             userId: socket.user._id,
             title: normalizedContent.substring(0, 30),
           });
           currentChatId = newChat._id;
+          chatDoc = newChat;
+          socket.join(roomForChat(currentChatId));
           socket.emit("chat_created", { chatId: currentChatId });
+        } else {
+          chatDoc = await findChatWithWriteAccess(currentChatId, socket.user._id);
         }
+
+        const chatRoom = roomForChat(currentChatId);
 
         /* ── 2. Persist user message ── */
         const userMessage = await Message.create({
           chatId: currentChatId,
           senderRole: "user",
+          senderUserId: socket.user._id,
+          senderName: socket.user.fullName || "User",
           content: normalizedContent,
           attachments: normalizedAttachments,
+        });
+
+        socket.to(chatRoom).emit("chat_message_created", {
+          chatId: currentChatId,
+          message: userMessage,
         });
 
         /* ── 3. Build Gemini conversation history ── */
@@ -148,6 +202,7 @@ const registerSocketHandlers = (io) => {
             socket.emit("ai_error", {
               error:
                 "Gemini API key is invalid. Update GEMINI_API_KEY in server .env.",
+              clientRequestId,
             });
             return;
           }
@@ -156,6 +211,7 @@ const registerSocketHandlers = (io) => {
             socket.emit("ai_error", {
               error:
                 "Generative Language API is disabled for this key/project. Enable it in Google Cloud.",
+              clientRequestId,
             });
             return;
           }
@@ -164,6 +220,7 @@ const registerSocketHandlers = (io) => {
             socket.emit("ai_error", {
               error:
                 "Gemini API request is forbidden for this key/project. Check key restrictions and enabled APIs.",
+              clientRequestId,
             });
             return;
           }
@@ -173,6 +230,7 @@ const registerSocketHandlers = (io) => {
               error: retryAfterSeconds
                 ? `Gemini quota/rate limit exceeded. Retry after about ${retryAfterSeconds}s.`
                 : "Gemini quota/rate limit exceeded. Retry shortly.",
+              clientRequestId,
             });
             return;
           }
@@ -181,6 +239,7 @@ const registerSocketHandlers = (io) => {
             error:
               lastModelError?.message ||
               "No compatible Gemini model is available. Set GEMINI_MODEL in .env to a supported model.",
+            clientRequestId,
           });
           return;
         }
@@ -192,7 +251,7 @@ const registerSocketHandlers = (io) => {
           const text = chunk.text();
           if (text) {
             fullText += text;
-            socket.emit("ai_chunk", { text, chatId: currentChatId });
+            socket.emit("ai_chunk", { text, chatId: currentChatId, clientRequestId });
           }
         }
 
@@ -203,19 +262,33 @@ const registerSocketHandlers = (io) => {
           content: fullText,
         });
 
-        await Chat.findByIdAndUpdate(currentChatId, { updatedAt: new Date() });
+        const updatedAt = new Date();
+        await Chat.findByIdAndUpdate(currentChatId, { updatedAt });
 
         /* ── 7. Signal completion ── */
         socket.emit("ai_done", {
           userMessage,
           aiMessage,
           chatId: currentChatId,
+          clientRequestId,
+        });
+
+        socket.to(chatRoom).emit("chat_message_created", {
+          chatId: currentChatId,
+          message: aiMessage,
+        });
+
+        io.to(chatRoom).emit("chat_updated", {
+          chatId: currentChatId,
+          updatedAt,
+          title: chatDoc?.title,
         });
       } catch (err) {
         console.error("[Socket] send_message error:", err);
         socket.emit("ai_error", {
           error:
             err?.message || "Failed to generate AI response. Check server logs.",
+          clientRequestId,
         });
       }
     });

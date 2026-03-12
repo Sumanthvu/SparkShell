@@ -5,6 +5,11 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  findChatWithReadAccess,
+  findChatWithWriteAccess,
+  getAccessLevel,
+} from "../utils/chatAccess.js";
 
 const getGeminiClient = () => {
   const rawKey = process.env.GEMINI_API_KEY;
@@ -142,11 +147,24 @@ const getUserChats = asyncHandler(async (req, res) => {
   const chats = await Chat.find({ userId: req.user._id }).sort({
     updatedAt: -1,
   });
-  return res.status(200).json(new ApiResponse(200, chats, ""));
+
+  const payload = chats.map((chat) => ({
+    _id: chat._id,
+    title: chat.title,
+    userId: chat.userId,
+    createdAt: chat.createdAt,
+    updatedAt: chat.updatedAt,
+    accessLevel: getAccessLevel(chat, req.user._id),
+  }));
+
+  return res.status(200).json(new ApiResponse(200, payload, ""));
 });
 
 const getChatMessages = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
+
+  await findChatWithReadAccess(chatId, req.user._id);
+
   const messages = await Message.find({ chatId }).sort({ createdAt: 1 });
   return res.status(200).json(new ApiResponse(200, messages, ""));
 });
@@ -169,11 +187,15 @@ const sendMessage = asyncHandler(async (req, res) => {
       title: normalizedContent.substring(0, 30),
     });
     currentChatId = newChat._id;
+  } else {
+    await findChatWithWriteAccess(currentChatId, req.user._id);
   }
 
   const userMessage = await Message.create({
     chatId: currentChatId,
     senderRole: "user",
+    senderUserId: req.user._id,
+    senderName: req.user.fullName || "User",
     content: normalizedContent,
     attachments: normalizedAttachments,
   });

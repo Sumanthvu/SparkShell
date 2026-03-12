@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Menu, Plus, MessageSquare, Settings, Play, User, Send, X, Code, Terminal, PanelRightOpen, PanelRightClose, Paperclip, Mic, Copy, Check } from 'lucide-react';
+import { Menu, Plus, MessageSquare, Settings, Play, User, Send, X, Code, Terminal, PanelRightOpen, PanelRightClose, Paperclip, Mic, Copy, Check, Inbox, UserPlus, Shield, ShieldCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import remarkGfm from 'remark-gfm';
@@ -13,11 +13,18 @@ export default function ChatDashboard() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSandboxOpen, setIsSandboxOpen] = useState(false);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isInboxView, setIsInboxView] = useState(false);
   const [chats, setChats] = useState([]);
+  const [sharedChats, setSharedChats] = useState([]);
+  const [inboxInvites, setInboxInvites] = useState([]);
   const [activeChatId, setActiveChatId] = useState(() => localStorage.getItem('activeChatId'));
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [invitePermission, setInvitePermission] = useState('read');
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState([]);
   const [previewImage, setPreviewImage] = useState(null);
   const [editorCode, setEditorCode] = useState('# Code editor ready\n');
@@ -41,12 +48,38 @@ export default function ChatDashboard() {
     }
   })();
 
+  const currentUserId = (() => {
+    try {
+      const rawUser = localStorage.getItem('user');
+      if (!rawUser) return '';
+      const parsed = JSON.parse(rawUser);
+      return parsed?._id || parsed?.id || '';
+    } catch {
+      return '';
+    }
+  })();
+
+  const allChats = [...chats, ...sharedChats];
+  const activeChatMeta = allChats.find((item) => item._id === activeChatId);
+  const canWriteCurrentChat = activeChatMeta
+    ? activeChatMeta.accessLevel === 'owner' || activeChatMeta.accessLevel === 'write'
+    : true;
+  const canManageCollaborators = activeChatMeta?.accessLevel === 'owner';
+
   useEffect(() => {
     fetchChats();
+    fetchSharedChats();
+    fetchInboxInvites();
   }, []);
 
   useEffect(() => {
     if (activeChatId) fetchMessages(activeChatId);
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!activeChatId) return;
+    const sock = getSocket();
+    sock.emit('join_chat', { chatId: activeChatId });
   }, [activeChatId]);
 
   useEffect(() => {
@@ -136,6 +169,35 @@ export default function ChatDashboard() {
       fetchChats();
     };
 
+    const onChatMessageCreated = ({ chatId, message }) => {
+      if (!message?._id || !chatId) return;
+
+      if (String(chatId) === String(activeChatIdRef.current)) {
+        setMessages((prev) => {
+          const exists = prev.some((item) => String(item?._id) === String(message._id));
+          if (exists) return prev;
+          return [...prev, message];
+        });
+      }
+
+      fetchChats();
+      fetchSharedChats();
+    };
+
+    const onInboxUpdated = () => {
+      fetchInboxInvites();
+    };
+
+    const onSharedChatsUpdated = () => {
+      fetchSharedChats();
+      fetchChats();
+    };
+
+    const onChatUpdated = () => {
+      fetchChats();
+      fetchSharedChats();
+    };
+
     const onAiChunk = ({ text }) => {
       setIsLoading(false);
       typingQueueRef.current.push(...Array.from(text || ''));
@@ -175,12 +237,20 @@ export default function ChatDashboard() {
     };
 
     sock.on('chat_created', onChatCreated);
+    sock.on('chat_message_created', onChatMessageCreated);
+    sock.on('inbox_updated', onInboxUpdated);
+    sock.on('shared_chats_updated', onSharedChatsUpdated);
+    sock.on('chat_updated', onChatUpdated);
     sock.on('ai_chunk', onAiChunk);
     sock.on('ai_done', onAiDone);
     sock.on('ai_error', onAiError);
 
     return () => {
       sock.off('chat_created', onChatCreated);
+      sock.off('chat_message_created', onChatMessageCreated);
+      sock.off('inbox_updated', onInboxUpdated);
+      sock.off('shared_chats_updated', onSharedChatsUpdated);
+      sock.off('chat_updated', onChatUpdated);
       sock.off('ai_chunk', onAiChunk);
       sock.off('ai_done', onAiDone);
       sock.off('ai_error', onAiError);
@@ -224,19 +294,70 @@ export default function ChatDashboard() {
       const chatList = res.data.data || [];
       setChats(chatList);
 
-      if (!chatList.length) {
-        setActiveChatId(null);
-        setMessages([]);
-        return;
-      }
-
-      if (activeChatId) {
-        const exists = chatList.some((chat) => chat._id === activeChatId);
-        if (!exists) {
-          setActiveChatId(chatList[0]._id);
-        }
+      if (!activeChatId && chatList.length) {
+        setActiveChatId(chatList[0]._id);
       }
     } catch (err) { console.error(err); }
+  };
+
+  const fetchSharedChats = async () => {
+    try {
+      const res = await axiosClient.get(`${chatApiBase}/shared`);
+      const sharedList = res.data.data || [];
+      setSharedChats(sharedList);
+
+      if (!activeChatId && sharedList.length && chats.length === 0) {
+        setActiveChatId(sharedList[0]._id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchInboxInvites = async () => {
+    try {
+      const res = await axiosClient.get(`${chatApiBase}/invitations/inbox`);
+      setInboxInvites(res.data.data || []);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const refreshChatLists = async () => {
+    await Promise.all([fetchChats(), fetchSharedChats(), fetchInboxInvites()]);
+  };
+
+  const sendInvite = async () => {
+    if (!activeChatId || !inviteEmail.trim() || !canManageCollaborators || isSendingInvite) return;
+
+    setIsSendingInvite(true);
+    try {
+      await axiosClient.post(`${chatApiBase}/${activeChatId}/invitations`, {
+        email: inviteEmail.trim(),
+        permission: invitePermission,
+      });
+      setInviteEmail('');
+      setInvitePermission('read');
+      setIsInviteModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      const serverMessage = err?.response?.data?.message || 'Failed to send invitation.';
+      setMessages((prev) => [
+        ...prev,
+        { senderRole: 'ai', content: `⚠️ ${serverMessage}` },
+      ]);
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
+
+  const respondToInvite = async (inviteId, action) => {
+    try {
+      await axiosClient.post(`${chatApiBase}/invitations/${inviteId}/respond`, { action });
+      await refreshChatLists();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const fetchMessages = async (id) => {
@@ -382,8 +503,20 @@ export default function ChatDashboard() {
     e?.preventDefault();
     if ((!inputMessage.trim() && !attachedFiles.length) || isLoading) return;
 
+    if (activeChatId && !canWriteCurrentChat) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          senderRole: 'ai',
+          content: '⚠️ This shared chat is read-only for you. Ask the owner for write access.',
+        },
+      ]);
+      return;
+    }
+
     const userMsgContent = inputMessage.trim() || 'Please analyze the attached files/images.';
     const attachmentPayload = attachedFiles.map(({ id, ...rest }) => rest);
+    const clientRequestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     setInputMessage('');
     setAttachedFiles([]);
@@ -393,7 +526,13 @@ export default function ChatDashboard() {
     /* Add the user bubble immediately; the AI streaming bubble appears on first chunk */
     setMessages((prev) => [
       ...prev,
-      { senderRole: 'user', content: userMsgContent, attachments: attachmentPayload },
+      {
+        senderRole: 'user',
+        senderUserId: currentUserId,
+        senderName: userName,
+        content: userMsgContent,
+        attachments: attachmentPayload,
+      },
     ]);
     setIsLoading(true); // shows bounce until first ai_chunk arrives
 
@@ -402,6 +541,7 @@ export default function ChatDashboard() {
       chatId: activeChatId,
       content: userMsgContent,
       attachments: attachmentPayload,
+      clientRequestId,
     });
   };
 
@@ -497,44 +637,108 @@ export default function ChatDashboard() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(72,96,145,0.14),transparent_38%),linear-gradient(180deg,#040507_0%,#020203_100%)]" />
       </div>
 
-      <div className="fixed inset-y-0 left-0 z-50 w-12 border-r border-white/10 bg-black/90 backdrop-blur-xl flex flex-col items-center py-4">
-        <button className="h-9 w-9 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-gray-200 flex items-center justify-center transition-colors" onClick={() => setIsSidebarOpen((prev) => !prev)}>
+      <div className="fixed inset-y-0 left-0 z-50 w-12 border-r border-white/10 bg-black/90 backdrop-blur-xl flex flex-col items-center py-4 gap-2">
+        <button className="h-9 w-9 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-gray-200 flex items-center justify-center transition-colors" onClick={() => { setIsInboxView(false); setIsSidebarOpen((prev) => !prev); }}>
           <Menu size={20} />
+        </button>
+
+        <button
+          onClick={() => { setIsInboxView(true); setIsSidebarOpen(true); }}
+          className={`relative h-9 w-9 rounded-xl text-gray-200 flex items-center justify-center transition-colors ${isInboxView && isSidebarOpen ? 'bg-white/[0.12]' : 'bg-white/[0.04] hover:bg-white/[0.08]'}`}
+          title="Inbox"
+        >
+          <Inbox size={17} />
+          {inboxInvites.length > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-blue-500 text-[10px] text-white flex items-center justify-center">
+              {Math.min(inboxInvites.length, 9)}
+            </span>
+          )}
         </button>
       </div>
 
       <aside className={`fixed inset-y-0 left-12 z-40 w-[300px] transform border-r border-white/10 bg-[#0c0e13]/95 backdrop-blur-2xl transition-transform duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-          <h2 className="text-xl font-semibold tracking-tight text-white/95">Renzo</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-white/95">{isInboxView ? 'Inbox' : 'Renzo'}</h2>
           <button onClick={() => setIsSidebarOpen(false)} className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"><X size={18} /></button>
         </div>
 
-        <div className="px-3 pt-3 space-y-1.5">
-          <button
-            onClick={() => { setActiveChatId(null); setMessages([]); setIsSidebarOpen(false); }}
-            className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-white/[0.05] border border-white/10 hover:bg-white/[0.1] transition-colors"
-          >
-            <Plus size={17} className="text-gray-200" />
-            <span className="text-sm font-medium text-gray-100">New chat</span>
-          </button>
-        </div>
+        {!isInboxView && (
+          <div className="px-3 pt-3 space-y-1.5">
+            <button
+              onClick={() => { setActiveChatId(null); setMessages([]); setIsSidebarOpen(false); }}
+              className="w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 bg-white/[0.05] border border-white/10 hover:bg-white/[0.1] transition-colors"
+            >
+              <Plus size={17} className="text-gray-200" />
+              <span className="text-sm font-medium text-gray-100">New chat</span>
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto px-3 pb-4 pt-4 no-scrollbar smooth-scroll">
-          <p className="px-2 mb-2 text-[11px] uppercase tracking-[0.16em] text-gray-500">Your chats</p>
-          <div className="space-y-1">
-            {chats.map(chat => (
-              <button
-                key={chat._id}
-                onClick={() => { setActiveChatId(chat._id); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors ${activeChatId === chat._id ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/[0.05]'}`}
-              >
-                <MessageSquare size={15} className={`${activeChatId === chat._id ? 'text-white' : 'text-gray-500'}`} />
-                <span className="truncate text-sm">{chat.title}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+          {isInboxView ? (
+            <div className="space-y-2">
+              {inboxInvites.length === 0 ? (
+                <p className="text-sm text-gray-400 px-2">No pending collaboration requests.</p>
+              ) : (
+                inboxInvites.map((invite) => (
+                  <div key={invite._id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <p className="text-sm text-white font-medium truncate">{invite.chatTitle || 'Shared chat invite'}</p>
+                    <p className="text-xs text-gray-400 mt-1">From: {invite.inviter?.fullName || invite.inviter?.email}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">Access: {invite.permission === 'write' ? 'Read + Write' : 'Read only'}</p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => respondToInvite(invite._id, 'accept')}
+                        className="flex-1 rounded-lg bg-blue-500/20 border border-blue-400/30 text-blue-200 text-xs py-1.5 hover:bg-blue-500/30 transition-colors"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => respondToInvite(invite._id, 'reject')}
+                        className="flex-1 rounded-lg bg-white/[0.04] border border-white/10 text-gray-300 text-xs py-1.5 hover:bg-white/[0.08] transition-colors"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <>
+              <p className="px-2 mb-2 text-[11px] uppercase tracking-[0.16em] text-gray-500">Your chats</p>
+              <div className="space-y-1 mb-5">
+                {chats.map((chat) => (
+                  <button
+                    key={chat._id}
+                    onClick={() => { setActiveChatId(chat._id); setIsSidebarOpen(false); }}
+                    className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors ${activeChatId === chat._id ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/[0.05]'}`}
+                  >
+                    <MessageSquare size={15} className={`${activeChatId === chat._id ? 'text-white' : 'text-gray-500'}`} />
+                    <span className="truncate text-sm">{chat.title}</span>
+                  </button>
+                ))}
+              </div>
 
+              <p className="px-2 mb-2 text-[11px] uppercase tracking-[0.16em] text-gray-500">Shared chats</p>
+              <div className="space-y-1">
+                {sharedChats.length === 0 ? (
+                  <p className="px-2 text-xs text-gray-500">No shared chats yet</p>
+                ) : (
+                  sharedChats.map((chat) => (
+                    <button
+                      key={chat._id}
+                      onClick={() => { setActiveChatId(chat._id); setIsSidebarOpen(false); }}
+                      className={`w-full flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-colors ${activeChatId === chat._id ? 'bg-white/10 text-white' : 'text-gray-300 hover:bg-white/[0.05]'}`}
+                    >
+                      {chat.accessLevel === 'write' ? <ShieldCheck size={15} className="text-blue-300" /> : <Shield size={15} className="text-gray-500" />}
+                      <span className="truncate text-sm">{chat.title}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
       </aside>
 
       {isSidebarOpen && <div className="fixed inset-y-0 right-0 left-12 z-30 bg-black/45" onClick={() => setIsSidebarOpen(false)} />}
@@ -557,9 +761,30 @@ export default function ChatDashboard() {
           onChange={handleFilesPicked}
         />
 
-        <header className="h-14 px-4 md:px-6 border-b border-white/10 bg-black/55 backdrop-blur-xl flex items-center justify-end">
+        <header className="h-14 px-4 md:px-6 border-b border-white/10 bg-black/55 backdrop-blur-xl flex items-center justify-between">
+
+          <div className="text-xs md:text-sm text-gray-400 truncate pr-3">
+            {activeChatMeta ? (
+              <span>
+                {activeChatMeta.accessLevel === 'owner' ? 'Owner' : activeChatMeta.accessLevel === 'write' ? 'Shared • Read + Write' : 'Shared • Read only'}
+              </span>
+            ) : (
+              <span>New chat</span>
+            )}
+          </div>
 
           <div className="flex items-center gap-2.5">
+            {activeChatId && (
+              <button
+                onClick={() => canManageCollaborators && setIsInviteModalOpen(true)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors ${canManageCollaborators ? 'border-white/10 bg-white/[0.04] text-gray-300 hover:bg-white/[0.08]' : 'border-white/10 bg-white/[0.02] text-gray-500 cursor-not-allowed'}`}
+                title={canManageCollaborators ? 'Add collaborator' : 'Only chat owner can add collaborators'}
+              >
+                <UserPlus size={16} />
+                <span className="hidden sm:inline">Add collaborator</span>
+              </button>
+            )}
+
             <button
               onClick={() => setIsSandboxOpen(!isSandboxOpen)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-colors ${isSandboxOpen ? 'border-blue-400/40 bg-blue-500/15 text-blue-200' : 'border-white/10 bg-white/[0.04] text-gray-300 hover:bg-white/[0.08]'}`}
@@ -611,12 +836,12 @@ export default function ChatDashboard() {
                   <button type="button" title="Attach files/images (Shift+click for folder)" onClick={handleAttachClick} className="absolute left-3 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full text-gray-400 hover:text-white hover:bg-white/[0.08] flex items-center justify-center transition-colors">
                     <Paperclip size={16} />
                   </button>
-                  <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="What's on your mind?" className="w-full bg-transparent pl-11 pr-28 py-3.5 text-[21px] leading-none text-gray-100 placeholder-gray-500 focus:outline-none" />
+                  <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder={activeChatId && !canWriteCurrentChat ? "Read-only shared chat" : "What's on your mind?"} className="w-full bg-transparent pl-11 pr-28 py-3.5 text-[21px] leading-none text-gray-100 placeholder-gray-500 focus:outline-none" disabled={activeChatId && !canWriteCurrentChat} />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                     <button type="button" className="h-9 w-9 rounded-full border border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.08] flex items-center justify-center transition-colors">
                       <Mic size={16} />
                     </button>
-                    <button type="submit" disabled={!inputMessage.trim() && !attachedFiles.length} className="h-9 w-9 rounded-full bg-white text-black hover:bg-gray-200 transition-colors disabled:opacity-40 flex items-center justify-center">
+                    <button type="submit" disabled={(!inputMessage.trim() && !attachedFiles.length) || (activeChatId && !canWriteCurrentChat)} className="h-9 w-9 rounded-full bg-white text-black hover:bg-gray-200 transition-colors disabled:opacity-40 flex items-center justify-center">
                       <Send size={15} />
                     </button>
                   </div>
@@ -626,13 +851,19 @@ export default function ChatDashboard() {
             </div>
           ) : (
             <div className="w-full max-w-3xl mx-auto px-4 md:px-6 py-8 pb-40 space-y-6">
-              {messages.map((msg, idx) => (
-                <div key={idx} className={`flex ${msg.senderRole === 'user' ? 'justify-end' : 'justify-start w-full'}`}>
+              {messages.map((msg, idx) => {
+                const isOwnUserMessage = msg.senderRole === 'user' && String(msg.senderUserId || '') === String(currentUserId);
+
+                return (
+                <div key={idx} className={`flex ${msg.senderRole === 'user' ? (isOwnUserMessage ? 'justify-end' : 'justify-start w-full') : 'justify-start w-full'}`}>
                   {msg.senderRole === 'user' ? (
-                    /* ── User bubble — compact pill, right-aligned ── */
-                    <div className="flex flex-col items-end gap-1.5 max-w-[78%]">
+                    /* ── User/collaborator prompt bubble ── */
+                    <div className={`flex flex-col gap-1.5 max-w-[78%] ${isOwnUserMessage ? 'items-end' : 'items-start'}`}>
+                      {!isOwnUserMessage && (
+                        <p className="text-[11px] text-gray-500 px-1">{msg.senderName || 'Collaborator'}</p>
+                      )}
                       {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2 justify-end">
+                        <div className={`flex flex-wrap gap-2 ${isOwnUserMessage ? 'justify-end' : 'justify-start'}`}>
                           {msg.attachments.map((file, fileIdx) => (
                             <div key={`${file.name}-${fileIdx}`} className="relative group cursor-pointer flex flex-col items-center">
                               {file.previewDataUrl ? (
@@ -645,7 +876,7 @@ export default function ChatDashboard() {
                           ))}
                         </div>
                       )}
-                      <div className="rounded-2xl px-4 py-3 bg-[#1e2130] text-gray-100 text-[15px] leading-[1.7]">
+                      <div className={`rounded-2xl px-4 py-3 text-gray-100 text-[15px] leading-[1.7] ${isOwnUserMessage ? 'bg-[#1e2130]' : 'bg-[#141822] border border-white/10'}`}>
                         {msg.content || ''}
                       </div>
                     </div>
@@ -677,7 +908,7 @@ export default function ChatDashboard() {
                     </div>
                   )}
                 </div>
-              ))}
+              );})}
 
               {isLoading && (
                 <div className="flex justify-start w-full">
@@ -716,12 +947,12 @@ export default function ChatDashboard() {
                 <button type="button" title="Attach files/images (Shift+click for folder)" onClick={handleAttachClick} className="absolute left-3 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full text-gray-400 hover:text-white hover:bg-white/[0.08] flex items-center justify-center transition-colors">
                   <Paperclip size={16} />
                 </button>
-                <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="What's on your mind?" className="w-full bg-transparent pl-11 pr-28 py-3.5 text-[15px] text-gray-100 placeholder-gray-500 focus:outline-none" />
+                <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder={activeChatId && !canWriteCurrentChat ? "Read-only shared chat" : "What's on your mind?"} className="w-full bg-transparent pl-11 pr-28 py-3.5 text-[15px] text-gray-100 placeholder-gray-500 focus:outline-none" disabled={activeChatId && !canWriteCurrentChat} />
                 <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                   <button type="button" className="h-9 w-9 rounded-full border border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.08] flex items-center justify-center transition-colors">
                     <Mic size={16} />
                   </button>
-                  <button type="submit" disabled={!inputMessage.trim() && !attachedFiles.length} className="h-9 w-9 rounded-full bg-white text-black hover:bg-gray-200 transition-colors disabled:opacity-40 flex items-center justify-center">
+                  <button type="submit" disabled={(!inputMessage.trim() && !attachedFiles.length) || (activeChatId && !canWriteCurrentChat)} className="h-9 w-9 rounded-full bg-white text-black hover:bg-gray-200 transition-colors disabled:opacity-40 flex items-center justify-center">
                     <Send size={15} />
                   </button>
                 </div>
@@ -730,6 +961,52 @@ export default function ChatDashboard() {
           </div>
         )}
       </div>
+
+      {isInviteModalOpen && (
+        <div className="fixed inset-0 z-[190] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsInviteModalOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111520] p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Add collaborator</h3>
+              <button onClick={() => setIsInviteModalOpen(false)} className="h-8 w-8 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 flex items-center justify-center">
+                <X size={16} />
+              </button>
+            </div>
+
+            <label className="block text-xs text-gray-400 mb-2">Collaborator email</label>
+            <input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="name@example.com"
+              className="w-full rounded-xl border border-white/10 bg-[#0d1119] px-3 py-2.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-400/40"
+            />
+
+            <label className="block text-xs text-gray-400 mt-4 mb-2">Permission</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setInvitePermission('read')}
+                className={`rounded-xl border px-3 py-2 text-sm transition-colors ${invitePermission === 'read' ? 'border-blue-400/40 bg-blue-500/15 text-blue-200' : 'border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.06]'}`}
+              >
+                Read
+              </button>
+              <button
+                onClick={() => setInvitePermission('write')}
+                className={`rounded-xl border px-3 py-2 text-sm transition-colors ${invitePermission === 'write' ? 'border-blue-400/40 bg-blue-500/15 text-blue-200' : 'border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.06]'}`}
+              >
+                Read + Write
+              </button>
+            </div>
+
+            <button
+              onClick={sendInvite}
+              disabled={!inviteEmail.trim() || isSendingInvite}
+              className="mt-5 w-full rounded-xl bg-white text-black py-2.5 text-sm font-medium disabled:opacity-40 hover:bg-gray-200 transition-colors"
+            >
+              {isSendingInvite ? 'Sending...' : 'Send request'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {previewImage && (
         <div className="fixed inset-0 z-[200] bg-black/92 flex items-center justify-center p-6" onClick={() => setPreviewImage(null)}>

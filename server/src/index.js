@@ -50,6 +50,7 @@ import { Server } from "socket.io";
 import connectDB from "./db/index.js";
 import { app } from "./app.js";
 import registerSocketHandlers from "./socket/index.js";
+import { setIO } from "./socket/ioStore.js";
 
 connectDB()
   .then(() => {
@@ -61,6 +62,8 @@ connectDB()
         credentials: true,
       },
     });
+
+    setIO(io);
 
     registerSocketHandlers(io);
 

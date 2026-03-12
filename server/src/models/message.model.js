@@ -12,6 +12,14 @@ const messageSchema = new Schema(
       enum: ["user", "ai"],
       required: true,
     },
+    senderUserId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+    },
+    senderName: {
+      type: String,
+      trim: true,
+    },
     content: {
       type: String,
       required: true,
@@ -31,5 +39,7 @@ const messageSchema = new Schema(
     timestamps: true,
   }
 );
+
+messageSchema.index({ chatId: 1, createdAt: 1 });
 
 export const Message = mongoose.model("Message", messageSchema);
