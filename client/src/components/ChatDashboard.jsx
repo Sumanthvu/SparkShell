@@ -132,11 +132,13 @@ export default function ChatDashboard() {
       return;
     }
 
-    const batchSize = typingQueueRef.current.length > 160
-      ? 8
-      : typingQueueRef.current.length > 80
-        ? 4
-        : 2;
+    const batchSize = typingQueueRef.current.length > 260
+      ? 14
+      : typingQueueRef.current.length > 140
+        ? 8
+        : typingQueueRef.current.length > 60
+          ? 4
+          : 2;
 
     const nextSlice = typingQueueRef.current.splice(0, batchSize).join('');
 
@@ -160,7 +162,7 @@ export default function ChatDashboard() {
 
     typingIntervalRef.current = setInterval(() => {
       flushTypingQueue();
-    }, 25);
+    }, 32);
   };
 
   /* ── Socket.io setup — connect once on mount, clean up on unmount ── */
@@ -933,7 +935,11 @@ export default function ChatDashboard() {
                         prose-table:text-[14px] prose-th:text-gray-200 prose-td:text-gray-300
                         prose-code:text-blue-300 prose-code:text-[13.5px] prose-code:font-mono prose-code:before:content-none prose-code:after:content-none prose-code:bg-white/[0.06] prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
                         prose-pre:p-0 prose-pre:bg-transparent prose-pre:my-0">
-                        <ReactMarkdown components={mdComponents} remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>{msg.content || ''}</ReactMarkdown>
+                        {msg.isStreaming ? (
+                          <div className="whitespace-pre-wrap break-words leading-[1.9] text-gray-100">{msg.content || ''}</div>
+                        ) : (
+                          <ReactMarkdown components={mdComponents} remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>{msg.content || ''}</ReactMarkdown>
+                        )}
                       </div>
                       {/* Copy entire response button — appears on hover */}
                       {!msg.isStreaming && msg.content && (

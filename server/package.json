@@ -5,7 +5,7 @@
     "type": "module",
     "main": "src/index.js",
     "scripts": {
-        "dev": "kill-port 5000 && nodemon src/index.js",
+        "dev": "nodemon --signal SIGTERM src/dev-runner.js",
         "start": "node src/index.js"
     },
     "keywords": [],
