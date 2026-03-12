@@ -62,7 +62,7 @@ export default function Signup() {
       <div className="max-w-md w-full bg-gray-900/80 backdrop-blur-xl border border-gray-800 p-8 rounded-2xl shadow-[0_0_40px_rgba(59,130,246,0.1)] transform transition-all duration-500 hover:shadow-[0_0_60px_rgba(59,130,246,0.15)] hover:-translate-y-2">
         
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-white mb-2">Join ⚡ SparkShell</h1>
+          <h1 className="text-3xl font-bold text-white mb-2">Join ⚡ Renzo</h1>
           <p className="text-gray-400">
             {step === 1 ? 'Create your account to start compiling.' : 'Check your email for the verification code.'}
           </p>

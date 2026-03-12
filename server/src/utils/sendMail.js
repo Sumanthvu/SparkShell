@@ -15,7 +15,7 @@ export const sendEmail = async (to, sub, msg) => {
       subject: sub,
       htmlContent: msg,
       sender: {
-        name: "SparkShell AI",
+        name: "Renzo AI",
         email: process.env.SMTP_EMAIL,
       },
       to: [{ email: to }],

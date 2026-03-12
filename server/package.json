@@ -1,7 +1,7 @@
 {
-    "name": "sparkshell-server",
+    "name": "renzo-server",
     "version": "1.0.0",
-    "description": "SparkShell backend",
+    "description": "Renzo backend",
     "type": "module",
     "main": "src/index.js",
     "scripts": {

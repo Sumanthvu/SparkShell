@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Menu, Plus, MessageSquare, Settings, Play, User, Send, X, Code, Terminal, ChevronDown, PanelRightOpen, PanelRightClose } from 'lucide-react';
+import { Menu, Plus, MessageSquare, Settings, Play, User, Send, X, Code, Terminal, PanelRightOpen, PanelRightClose, Paperclip, Mic } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import axiosClient from '../api/axiosClient';
@@ -150,15 +150,25 @@ export default function ChatDashboard() {
   };
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-[#070a12] text-white font-sans flex">
+    <div className="relative h-screen w-full overflow-hidden bg-black text-white font-sans flex">
       <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(64,124,255,0.18),transparent_35%),radial-gradient(circle_at_85%_100%,rgba(31,84,201,0.16),transparent_38%),linear-gradient(180deg,#0b1220_0%,#070a12_55%,#070a12_100%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:44px_44px] opacity-25" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(72,96,145,0.14),transparent_38%),linear-gradient(180deg,#040507_0%,#020203_100%)]" />
       </div>
 
-      <aside className={`fixed inset-y-0 left-0 z-40 w-72 transform border-r border-white/10 bg-[#0b111d]/88 backdrop-blur-2xl transition-transform duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className="fixed inset-y-0 left-0 z-50 w-12 border-r border-white/10 bg-black/90 backdrop-blur-xl flex flex-col items-center py-4">
+        <button className="h-9 w-9 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-gray-200 flex items-center justify-center transition-colors" onClick={() => setIsSidebarOpen((prev) => !prev)}>
+          <Menu size={20} />
+        </button>
+        <div className="mt-5 flex flex-col items-center gap-3 text-gray-400">
+          <button className="h-8 w-8 rounded-lg hover:bg-white/[0.06] flex items-center justify-center transition-colors"><MessageSquare size={16} /></button>
+          <button className="h-8 w-8 rounded-lg hover:bg-white/[0.06] flex items-center justify-center transition-colors"><Code size={16} /></button>
+          <button className="h-8 w-8 rounded-lg hover:bg-white/[0.06] flex items-center justify-center transition-colors"><Settings size={16} /></button>
+        </div>
+      </div>
+
+      <aside className={`fixed inset-y-0 left-12 z-40 w-80 transform border-r border-white/10 bg-[#05080f]/92 backdrop-blur-2xl transition-transform duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="flex items-center justify-between px-4 py-4 border-b border-white/10">
-          <h2 className="text-xl font-semibold tracking-tight text-white/95">SparkShell</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-white/95">Renzo</h2>
           <button onClick={() => setIsSidebarOpen(false)} className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"><X size={19} /></button>
         </div>
 
@@ -189,11 +199,10 @@ export default function ChatDashboard() {
         </div>
       </aside>
 
-      {isSidebarOpen && <div className="fixed inset-0 z-30 bg-black/40" onClick={() => setIsSidebarOpen(false)} />}
+      {isSidebarOpen && <div className="fixed inset-y-0 right-0 left-12 z-30 bg-black/45" onClick={() => setIsSidebarOpen(false)} />}
 
-      <div className="relative z-10 flex flex-col flex-1 min-w-0">
-        <header className="h-16 px-4 md:px-6 border-b border-white/10 bg-[#0b111d]/70 backdrop-blur-xl flex items-center justify-between">
-          <button onClick={() => setIsSidebarOpen(true)} className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"><Menu size={22} /></button>
+      <div className="relative z-10 flex flex-col flex-1 min-w-0 ml-12">
+        <header className="h-14 px-4 md:px-6 border-b border-white/10 bg-black/55 backdrop-blur-xl flex items-center justify-end">
 
           <div className="flex items-center gap-2.5">
             <button
@@ -222,27 +231,30 @@ export default function ChatDashboard() {
         <main ref={chatContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center px-4">
-              <div className="w-full max-w-3xl text-center">
-                <div className="mx-auto mb-7 relative h-24 w-24 md:h-28 md:w-28">
-                  <div className="absolute inset-0 rounded-full bg-blue-500/20 blur-2xl" />
-                  <div className="absolute inset-[10%] rounded-full border border-blue-300/45 bg-gradient-to-br from-blue-300/35 via-sky-300/15 to-transparent shadow-[0_0_55px_rgba(96,165,250,0.42)]" />
-                  <div className="absolute inset-[28%] rounded-full bg-white/85" />
+              <div className="w-full max-w-3xl text-center -mt-10">
+                <div className="mx-auto mb-8 h-16 w-44 md:h-20 md:w-52">
+                  <img src="/temp/ui-logo.png" alt="Renzo logo" className="h-full w-full object-contain" />
                 </div>
-                <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-white/95">Ask anything</h1>
-                <p className="mt-3 text-gray-300/90 text-sm md:text-base">Search, reason, and build with SparkShell.</p>
-                <form onSubmit={handleSendMessage} className="mt-8 relative rounded-2xl border border-white/15 bg-[#111827]/78 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
-                  <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="Message SparkShell..." className="w-full bg-transparent px-5 py-4 md:py-5 pr-14 text-base text-gray-100 placeholder-gray-500 focus:outline-none" />
-                  <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg bg-white/10 hover:bg-blue-600 transition-colors flex items-center justify-center">
-                    <Send size={16} />
-                  </button>
+                <form onSubmit={handleSendMessage} className="mx-auto mt-2 relative w-full max-w-[720px] rounded-full border border-white/15 bg-[#0f1116]/88 backdrop-blur-xl">
+                  <Paperclip size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="What's on your mind?" className="w-full bg-transparent pl-11 pr-28 py-3.5 text-[21px] leading-none text-gray-100 placeholder-gray-500 focus:outline-none" />
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                    <button type="button" className="h-9 w-9 rounded-full border border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.08] flex items-center justify-center transition-colors">
+                      <Mic size={16} />
+                    </button>
+                    <button type="submit" className="h-9 w-9 rounded-full bg-white text-black hover:bg-gray-200 transition-colors flex items-center justify-center">
+                      <Send size={15} />
+                    </button>
+                  </div>
                 </form>
+                <p className="mt-6 text-[13px] text-gray-500">Renzo can make mistakes. Verify important information.</p>
               </div>
             </div>
           ) : (
             <div className="w-full max-w-4xl mx-auto px-4 md:px-6 py-8 pb-40 space-y-6">
               {messages.map((msg, idx) => (
                 <div key={idx} className={`flex ${msg.senderRole === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[92%] md:max-w-[82%] rounded-2xl px-4 py-3.5 border backdrop-blur-md ${msg.senderRole === 'user' ? 'bg-[#233047]/85 border-blue-300/20 text-gray-100' : 'bg-[#101724]/88 border-white/10 text-gray-200'}`}>
+                  <div className={`max-w-[92%] md:max-w-[82%] rounded-2xl px-4 py-3.5 border backdrop-blur-md ${msg.senderRole === 'user' ? 'bg-[#171b26] border-white/10 text-gray-100' : 'bg-[#0f1116] border-white/10 text-gray-200'}`}>
                     <div className={`text-[15px] leading-7 prose prose-invert max-w-none prose-p:my-3 prose-headings:my-4 prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-strong:text-white prose-code:text-blue-300 prose-code:before:content-none prose-code:after:content-none prose-pre:my-4 prose-pre:rounded-xl prose-pre:border prose-pre:border-white/10 prose-pre:bg-[#0f141d] prose-pre:px-4 prose-pre:py-3 prose-pre:overflow-x-auto ${msg.senderRole === 'user' ? 'prose-p:text-gray-100' : 'prose-p:text-gray-200'}`}>
                       <ReactMarkdown rehypePlugins={[rehypeHighlight]}>{msg.content}</ReactMarkdown>
                     </div>
@@ -252,7 +264,7 @@ export default function ChatDashboard() {
 
               {isLoading && (
                 <div className="flex justify-start">
-                  <div className="rounded-2xl px-4 py-3 border border-white/10 bg-[#101724]/88 backdrop-blur-md text-gray-300">
+                  <div className="rounded-2xl px-4 py-3 border border-white/10 bg-[#0f1116] backdrop-blur-md text-gray-300">
                     <div className="flex items-center gap-2">
                       <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }} />
                       <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '140ms' }} />
@@ -266,13 +278,19 @@ export default function ChatDashboard() {
         </main>
 
         {messages.length > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 px-4 md:px-6 pb-5 pt-10 bg-gradient-to-t from-[#070b13]/95 via-[#070b13]/78 to-transparent">
+          <div className="absolute bottom-0 left-0 right-0 px-4 md:px-6 pb-5 pt-10 bg-gradient-to-t from-black via-black/80 to-transparent">
             <div className="w-full max-w-4xl mx-auto">
-              <form onSubmit={handleSendMessage} className="relative rounded-2xl border border-white/15 bg-[#111827]/82 backdrop-blur-xl shadow-[0_0_0_1px_rgba(255,255,255,0.04)]">
-                <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="Message SparkShell..." className="w-full bg-transparent px-5 py-4 pr-14 text-[15px] text-gray-100 placeholder-gray-500 focus:outline-none" />
-                <button type="submit" disabled={!inputMessage.trim()} className="absolute right-2.5 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg bg-white/10 hover:bg-blue-600 transition-colors disabled:opacity-40 flex items-center justify-center">
-                  <Send size={16} />
-                </button>
+              <form onSubmit={handleSendMessage} className="relative rounded-full border border-white/15 bg-[#0f1116]/90 backdrop-blur-xl">
+                <Paperclip size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input type="text" value={inputMessage} onChange={(e) => setInputMessage(e.target.value)} placeholder="What's on your mind?" className="w-full bg-transparent pl-11 pr-28 py-3.5 text-[15px] text-gray-100 placeholder-gray-500 focus:outline-none" />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                  <button type="button" className="h-9 w-9 rounded-full border border-white/10 bg-white/[0.03] text-gray-300 hover:bg-white/[0.08] flex items-center justify-center transition-colors">
+                    <Mic size={16} />
+                  </button>
+                  <button type="submit" disabled={!inputMessage.trim()} className="h-9 w-9 rounded-full bg-white text-black hover:bg-gray-200 transition-colors disabled:opacity-40 flex items-center justify-center">
+                    <Send size={15} />
+                  </button>
+                </div>
               </form>
             </div>
           </div>

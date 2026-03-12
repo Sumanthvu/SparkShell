@@ -150,12 +150,12 @@ const sendOtpForRegistration = asyncHandler(async (req, res) => {
 
   // 5. Send Email via Brevo
   const emailMsg = `
-    <h2>Welcome to SparkShell!</h2>
+    <h2>Welcome to Renzo!</h2>
     <p>Your verification code is: <strong style="font-size: 24px;">${otp}</strong></p>
     <p>This code will expire in 5 minutes.</p>
   `;
   
-  const emailRes = await sendEmail(email, "Verify Your SparkShell Account", emailMsg);
+  const emailRes = await sendEmail(email, "Verify Your Renzo Account", emailMsg);
   
   // WE ADDED THESE TWO LOGS TO FORCE THE TERMINAL TO SPEAK
   console.log("--- BREVO RAW RESPONSE ---");
@@ -299,7 +299,7 @@ const forgotPassword = asyncHandler(async (req, res) => {
     <p>This code will expire in 5 minutes. If you did not request this, please ignore this email.</p>
   `;
 
-  const emailRes = await sendEmail(email, "Reset Your SparkShell Password", emailMsg);
+  const emailRes = await sendEmail(email, "Reset Your Renzo Password", emailMsg);
 
   if (!emailRes.success) {
     throw new ApiError(500, "Failed to send password reset email.");

@@ -23,7 +23,7 @@ app.use(cookieParser());
 // ── Routes ────────────────────────────────────────────────────────────────────
 // A simple health check route to verify the server is running
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "⚡ SparkShell API is running" });
+  res.json({ status: "ok", message: "⚡ Renzo API is running" });
 });
 
 // Import your user routes
