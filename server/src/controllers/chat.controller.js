@@ -8,8 +8,14 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import {
   findChatWithReadAccess,
   findChatWithWriteAccess,
-  getAccessLevel,
 } from "../utils/chatAccess.js";
+
+const toObjectId = (value, fieldName = "id") => {
+  if (!mongoose.Types.ObjectId.isValid(value)) {
+    throw new ApiError(400, `${fieldName} is invalid`);
+  }
+  return new mongoose.Types.ObjectId(value);
+};
 
 const getGeminiClient = () => {
   const rawKey = process.env.GEMINI_API_KEY;
@@ -144,18 +150,101 @@ const createNewChat = asyncHandler(async (req, res) => {
 });
 
 const getUserChats = asyncHandler(async (req, res) => {
-  const chats = await Chat.find({ userId: req.user._id }).sort({
-    updatedAt: -1,
-  });
+  const userId = toObjectId(req.user._id, "userId");
 
-  const payload = chats.map((chat) => ({
-    _id: chat._id,
-    title: chat.title,
-    userId: chat.userId,
-    createdAt: chat.createdAt,
-    updatedAt: chat.updatedAt,
-    accessLevel: getAccessLevel(chat, req.user._id),
-  }));
+  const payload = await Chat.aggregate([
+    {
+      $match: {
+        userId,
+      },
+    },
+    {
+      $sort: {
+        updatedAt: -1,
+      },
+    },
+    {
+      $lookup: {
+        from: "messages",
+        let: {
+          chatId: "$_id",
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $eq: ["$chatId", "$$chatId"],
+              },
+            },
+          },
+          {
+            $sort: {
+              createdAt: -1,
+            },
+          },
+          {
+            $limit: 1,
+          },
+          {
+            $project: {
+              _id: 1,
+              senderRole: 1,
+              content: 1,
+              createdAt: 1,
+            },
+          },
+        ],
+        as: "lastMessage",
+      },
+    },
+    {
+      $lookup: {
+        from: "messages",
+        let: {
+          chatId: "$_id",
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $eq: ["$chatId", "$$chatId"],
+              },
+            },
+          },
+          {
+            $count: "count",
+          },
+        ],
+        as: "messageStats",
+      },
+    },
+    {
+      $addFields: {
+        accessLevel: "owner",
+        collaboratorCount: {
+          $size: {
+            $ifNull: ["$collaborators", []],
+          },
+        },
+        lastMessage: {
+          $arrayElemAt: ["$lastMessage", 0],
+        },
+        messageCount: {
+          $ifNull: [
+            {
+              $arrayElemAt: ["$messageStats.count", 0],
+            },
+            0,
+          ],
+        },
+      },
+    },
+    {
+      $project: {
+        messageStats: 0,
+      },
+    },
+  ]);
 
   return res.status(200).json(new ApiResponse(200, payload, ""));
 });
@@ -165,7 +254,30 @@ const getChatMessages = asyncHandler(async (req, res) => {
 
   await findChatWithReadAccess(chatId, req.user._id);
 
-  const messages = await Message.find({ chatId }).sort({ createdAt: 1 });
+  const chatObjectId = toObjectId(chatId, "chatId");
+
+  const messages = await Message.aggregate([
+    {
+      $match: {
+        chatId: chatObjectId,
+      },
+    },
+    {
+      $sort: {
+        createdAt: 1,
+      },
+    },
+    {
+      $addFields: {
+        attachmentCount: {
+          $size: {
+            $ifNull: ["$attachments", []],
+          },
+        },
+      },
+    },
+  ]);
+
   return res.status(200).json(new ApiResponse(200, messages, ""));
 });
 

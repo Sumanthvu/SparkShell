@@ -47,5 +47,6 @@ const chatInvitationSchema = new Schema(
 );
 
 chatInvitationSchema.index({ chatId: 1, inviteeId: 1, status: 1 });
+chatInvitationSchema.index({ inviteeId: 1, status: 1, createdAt: -1 });
 
 export const ChatInvitation = mongoose.model("ChatInvitation", chatInvitationSchema);

@@ -7,64 +7,270 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import {
   findChatById,
-  getAccessLevel,
+  hasReadAccess,
   isOwner,
   roomForChat,
   roomForUser,
 } from "../utils/chatAccess.js";
 import { getIO } from "../socket/ioStore.js";
 
-const mapChatForSidebar = (chat, userId) => ({
-  _id: chat._id,
-  title: chat.title,
-  userId: chat.userId,
-  updatedAt: chat.updatedAt,
-  createdAt: chat.createdAt,
-  accessLevel: getAccessLevel(chat, userId),
-});
+const toObjectId = (value, fieldName = "id") => {
+  if (!mongoose.Types.ObjectId.isValid(value)) {
+    throw new ApiError(400, `${fieldName} is invalid`);
+  }
+  return new mongoose.Types.ObjectId(value);
+};
 
 const getSharedChats = asyncHandler(async (req, res) => {
-  const sharedChats = await Chat.find({
-    $or: [
-      {
-        "collaborators.userId": req.user._id,
+  const userId = toObjectId(req.user._id, "userId");
+
+  const sharedChats = await Chat.aggregate([
+    {
+      $match: {
+        $or: [
+          {
+            "collaborators.userId": userId,
+          },
+          {
+            userId,
+            collaborators: { $exists: true, $ne: [] },
+          },
+        ],
       },
-      {
-        userId: req.user._id,
-        collaborators: { $exists: true, $ne: [] },
+    },
+    {
+      $sort: {
+        updatedAt: -1,
       },
-    ],
-  }).sort({ updatedAt: -1 });
+    },
+    {
+      $lookup: {
+        from: "messages",
+        let: {
+          chatId: "$_id",
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $eq: ["$chatId", "$$chatId"],
+              },
+            },
+          },
+          {
+            $sort: {
+              createdAt: -1,
+            },
+          },
+          {
+            $limit: 1,
+          },
+          {
+            $project: {
+              _id: 1,
+              senderRole: 1,
+              content: 1,
+              createdAt: 1,
+            },
+          },
+        ],
+        as: "lastMessage",
+      },
+    },
+    {
+      $lookup: {
+        from: "messages",
+        let: {
+          chatId: "$_id",
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $eq: ["$chatId", "$$chatId"],
+              },
+            },
+          },
+          {
+            $count: "count",
+          },
+        ],
+        as: "messageStats",
+      },
+    },
+    {
+      $addFields: {
+        collaboratorCount: {
+          $size: {
+            $ifNull: ["$collaborators", []],
+          },
+        },
+        currentCollaborator: {
+          $arrayElemAt: [
+            {
+              $filter: {
+                input: {
+                  $ifNull: ["$collaborators", []],
+                },
+                as: "collab",
+                cond: {
+                  $eq: ["$$collab.userId", userId],
+                },
+              },
+            },
+            0,
+          ],
+        },
+        lastMessage: {
+          $arrayElemAt: ["$lastMessage", 0],
+        },
+        messageCount: {
+          $ifNull: [
+            {
+              $arrayElemAt: ["$messageStats.count", 0],
+            },
+            0,
+          ],
+        },
+      },
+    },
+    {
+      $addFields: {
+        accessLevel: {
+          $cond: [
+            {
+              $eq: ["$userId", userId],
+            },
+            "owner",
+            {
+              $cond: [
+                {
+                  $eq: ["$currentCollaborator.permission", "write"],
+                },
+                "write",
+                "read",
+              ],
+            },
+          ],
+        },
+      },
+    },
+    {
+      $project: {
+        messageStats: 0,
+        currentCollaborator: 0,
+      },
+    },
+  ]);
 
   return res
     .status(200)
-    .json(new ApiResponse(200, sharedChats.map((chat) => mapChatForSidebar(chat, req.user._id)), ""));
+    .json(new ApiResponse(200, sharedChats, ""));
 });
 
 const getChatCollaborators = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
   const chat = await findChatById(chatId);
 
-  if (!isOwner(chat, req.user._id) && getAccessLevel(chat, req.user._id) === "none") {
+  if (!hasReadAccess(chat, req.user._id)) {
     throw new ApiError(403, "You do not have access to this chat");
   }
 
-  const participantIds = [chat.userId, ...(chat.collaborators || []).map((collab) => collab.userId)];
-  const users = await User.find({ _id: { $in: participantIds } }).select("_id fullName email");
-  const usersById = new Map(users.map((user) => [String(user._id), user]));
+  const chatObjectId = toObjectId(chat._id, "chatId");
 
-  const owner = usersById.get(String(chat.userId));
+  const [aggregationResult] = await Chat.aggregate([
+    {
+      $match: {
+        _id: chatObjectId,
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "userId",
+        foreignField: "_id",
+        as: "ownerUser",
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "collaborators.userId",
+        foreignField: "_id",
+        as: "collaboratorUsers",
+      },
+    },
+    {
+      $addFields: {
+        owner: {
+          $let: {
+            vars: {
+              ownerDoc: {
+                $arrayElemAt: ["ownerUser", 0],
+              },
+            },
+            in: {
+              userId: "$$ownerDoc._id",
+              fullName: {
+                $ifNull: ["$$ownerDoc.fullName", "User"],
+              },
+              email: {
+                $ifNull: ["$$ownerDoc.email", ""],
+              },
+            },
+          },
+        },
+        collaborators: {
+          $map: {
+            input: {
+              $ifNull: ["$collaborators", []],
+            },
+            as: "collab",
+            in: {
+              $let: {
+                vars: {
+                  matchedUser: {
+                    $arrayElemAt: [
+                      {
+                        $filter: {
+                          input: "$collaboratorUsers",
+                          as: "user",
+                          cond: {
+                            $eq: ["$$user._id", "$$collab.userId"],
+                          },
+                        },
+                      },
+                      0,
+                    ],
+                  },
+                },
+                in: {
+                  userId: "$$collab.userId",
+                  fullName: {
+                    $ifNull: ["$$matchedUser.fullName", "User"],
+                  },
+                  email: {
+                    $ifNull: ["$$matchedUser.email", ""],
+                  },
+                  permission: "$$collab.permission",
+                  joinedAt: "$$collab.joinedAt",
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      $project: {
+        owner: 1,
+        collaborators: 1,
+      },
+    },
+  ]);
 
-  const collaborators = (chat.collaborators || []).map((collab) => {
-    const user = usersById.get(String(collab.userId));
-    return {
-      userId: collab.userId,
-      fullName: user?.fullName || "User",
-      email: user?.email || "",
-      permission: collab.permission,
-      joinedAt: collab.joinedAt,
-    };
-  });
+  const owner = aggregationResult?.owner || null;
+  const collaborators = aggregationResult?.collaborators || [];
 
   return res.status(200).json(
     new ApiResponse(
@@ -72,7 +278,7 @@ const getChatCollaborators = asyncHandler(async (req, res) => {
       {
         owner: owner
           ? {
-              userId: owner._id,
+              userId: owner.userId,
               fullName: owner.fullName,
               email: owner.email,
             }
@@ -148,29 +354,73 @@ const sendChatInvitation = asyncHandler(async (req, res) => {
 });
 
 const getInboxInvitations = asyncHandler(async (req, res) => {
-  const invites = await ChatInvitation.find({
-    inviteeId: req.user._id,
-    status: "pending",
-  })
-    .sort({ createdAt: -1 })
-    .populate("inviterId", "fullName email")
-    .populate("chatId", "title userId");
+  const userId = toObjectId(req.user._id, "userId");
 
-  const payload = invites
-    .filter((invite) => invite.chatId)
-    .map((invite) => ({
-      _id: invite._id,
-      chatId: invite.chatId._id,
-      chatTitle: invite.chatId.title,
-      inviter: {
-        userId: invite.inviterId?._id,
-        fullName: invite.inviterId?.fullName || "User",
-        email: invite.inviterId?.email || "",
+  const payload = await ChatInvitation.aggregate([
+    {
+      $match: {
+        inviteeId: userId,
+        status: "pending",
       },
-      permission: invite.permission,
-      status: invite.status,
-      createdAt: invite.createdAt,
-    }));
+    },
+    {
+      $sort: {
+        createdAt: -1,
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "inviterId",
+        foreignField: "_id",
+        as: "inviter",
+      },
+    },
+    {
+      $lookup: {
+        from: "chats",
+        localField: "chatId",
+        foreignField: "_id",
+        as: "chat",
+      },
+    },
+    {
+      $addFields: {
+        inviter: {
+          $arrayElemAt: ["$inviter", 0],
+        },
+        chat: {
+          $arrayElemAt: ["$chat", 0],
+        },
+      },
+    },
+    {
+      $match: {
+        "chat._id": {
+          $exists: true,
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 1,
+        chatId: "$chat._id",
+        chatTitle: "$chat.title",
+        inviter: {
+          userId: "$inviter._id",
+          fullName: {
+            $ifNull: ["$inviter.fullName", "User"],
+          },
+          email: {
+            $ifNull: ["$inviter.email", ""],
+          },
+        },
+        permission: 1,
+        status: 1,
+        createdAt: 1,
+      },
+    },
+  ]);
 
   return res.status(200).json(new ApiResponse(200, payload, ""));
 });
